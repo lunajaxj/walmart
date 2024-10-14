@@ -1,2 +1,3 @@
-https://detail.1688.com/offer/567663944318.html?spm=a260k.dacugeneral.pc_index_cht.5.681635e4IPepQ3&&object_id=567663944318&udsPoolId=3247645
-https://trade.1688.com/order/new_step_order_detail.htm?orderId=2234794874171499155&tracelog=20120313bscentertologisticsbuyer&#logisticsTabTitle
+version https://git-lfs.github.com/spec/v1
+oid sha256:482bef859e0d36262be9ebc6c2bb3a557740da61743ca3b6e9b774885c5c84c0
+size 286

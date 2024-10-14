@@ -1,1 +1,3 @@
-https://pic.imgdb.cn/item/6410095ef144a01007219df3.png
+version https://git-lfs.github.com/spec/v1
+oid sha256:02fe1391bfe97ad5ca6d9bd62df2799fb30d0fe1d6c13cedc1297b4e6383c3c5
+size 54

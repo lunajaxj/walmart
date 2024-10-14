@@ -1,1 +1,3 @@
-把这些内容帮我编辑五点亚马逊卖家描述，另额外编辑Package Include，Specifications，How To Use，Why Choose DISEN，Note.5个卖点总结的小标题【】括号起来,五个卖点详细一点
+version https://git-lfs.github.com/spec/v1
+oid sha256:fba818e6b4762f8abec4e8dbfcce23cfc1b572ccb4da76b38d663f05cda6efa7
+size 215

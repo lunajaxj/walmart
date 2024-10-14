@@ -1,9 +1,3 @@
-README file for the Yiddish spell file.
-
-The word list was provided by Raphael Finkel.  It is the same one that is used
-by uspell.
-
-There also is a romanized (transliterated) word list.  This is used for
-latin1.  To use this list when 'encoding' is utf-8 use ":set spelllang=yi-tr".
-
-Copyright Raphael Finkel.  Included with permission in Vim.
+version https://git-lfs.github.com/spec/v1
+oid sha256:8e39a790e54893ed6e15ac0f1cb6772264d7cde3980de2caff5b58e0a2c8acb9
+size 344

@@ -1,11 +1,3 @@
-This directory contains Vim scripts to be used with a specific compiler.
-They are used with the ":compiler" command.
-
-These scripts usually set options, for example 'errorformat'.
-See ":help write-compiler-plugin".
-
-If you want to write your own compiler plugin, have a look at the other files
-for how to do it, the format is simple.
-
-If you think a compiler plugin you have written is useful for others, please
-send it to Bram@vim.org.
+version https://git-lfs.github.com/spec/v1
+oid sha256:51d5980784304e5c547cbde207a26ae31dde955b99a78558faaea25c3d957b8f
+size 437

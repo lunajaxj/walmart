@@ -1,21 +1,3 @@
-The plugin directory is for standard Vim plugin scripts.
-
-All files here ending in .vim will be sourced by Vim when it starts up.
-Look in the file for hints on how it can be disabled without deleting it.
-
-getscriptPlugin.vim  get latest version of Vim scripts
-gzip.vim	     edit compressed files
-logiPat.vim	     logical operators on patterns
-manpager.vim	     using Vim as manpager
-matchparen.vim	     highlight paren matching the one under the cursor
-netrwPlugin.vim	     edit files over a network and browse (remote) directories
-rrhelper.vim	     used for --remote-wait editing
-spellfile.vim	     download a spellfile when it's missing
-tarPlugin.vim	     edit (compressed) tar files
-tohtml.vim	     convert a file with syntax highlighting to HTML
-vimballPlugin.vim    create and unpack .vba files
-zipPlugin.vim	     edit zip archives
-
-Note: the explorer.vim plugin is no longer here, the netrw.vim plugin has
-taken over browsing directories (also for remote directories).
-
+version https://git-lfs.github.com/spec/v1
+oid sha256:ad37e84b4ae98f276fcc1d1993f630138bba16f2411d576e0cb1e4b4f7c128a9
+size 976

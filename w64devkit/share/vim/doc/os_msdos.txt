@@ -1,15 +1,3 @@
-*os_msdos.txt*  For Vim version 9.0.  Last change: 2016 Feb 26
-
-
-		  VIM REFERENCE MANUAL    by Bram Moolenaar
-
-
-					*msdos* *ms-dos* *MSDOS* *MS-DOS*
-This file used to contain the particularities for the MS-DOS version of Vim.
-MS-DOS support was removed in patch 7.4.1399.  If you want to use it you will
-need to get a version older than that.  Note that the MS-DOS version doesn't
-work, there is not enough memory.  The DOS32 version (using DJGPP) might still
-work on older systems.
-
-
- vim:tw=78:ts=8:noet:ft=help:norl:
+version https://git-lfs.github.com/spec/v1
+oid sha256:0a85bd0aca910676e36316093abc6896386fff4887c1c0d930be42c4574f410d
+size 523

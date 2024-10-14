@@ -1,22 +1,3 @@
-The autoload directory is for standard Vim autoload scripts.
-
-These are functions used by plugins and for general use.  They will be loaded
-automatically when the function is invoked.  See ":help autoload".
-
-gzip.vim	for editing compressed files
-netrw*.vim	browsing (remote) directories and editing remote files
-tar.vim		browsing tar files
-zip.vim		browsing zip files
-paste.vim	common code for mswin.vim, menu.vim and macmap.vim
-spellfile.vim	downloading of a missing spell file
-
-Omni completion files:
-ccomplete.vim		C
-csscomplete.vim		HTML / CSS
-htmlcomplete.vim	HTML
-javascriptcomplete.vim  Javascript
-phpcomplete.vim		PHP
-pythoncomplete.vim	Python
-rubycomplete.vim	Ruby
-syntaxcomplete.vim	from syntax highlighting
-xmlcomplete.vim		XML (uses files in the xml directory)
+version https://git-lfs.github.com/spec/v1
+oid sha256:37ab54c6c5c4c530a855647cf2ac05c3b4c03bf16b21eec913b5ea1b95ce59f5
+size 773

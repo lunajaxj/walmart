@@ -1,2 +1,3 @@
-l752.kdltps.com:15818
-t19932187800946
+version https://git-lfs.github.com/spec/v1
+oid sha256:25c2c189d4ac9781fa052f0e9a3b10d69648880543fe3195259078dda2596b3b
+size 40
