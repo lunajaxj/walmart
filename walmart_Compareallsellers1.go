@@ -344,6 +344,11 @@ func crawler(id string, file *excelize.File, fileName string) {
 			log.Printf("ID: %s 被风控, 响应包含 'Robot or human?'，尝试更换IP并重试...", id)
 			retries++
 			time.Sleep(time.Second * 5)
+			row := []interface{}{
+				id, "被风控，仅写入id", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+			}
+			appendToExcel(file, fileName, row)
+			log.Printf("ID: %s 被风控，仅写入 ID", id)
 			continue
 		}
 
@@ -354,13 +359,29 @@ func crawler(id string, file *excelize.File, fileName string) {
 				log.Printf("ID: %s 返回 HTML 内容，可能触发风控，尝试更换IP并重试...", id)
 				retries++
 				time.Sleep(time.Second * 5)
+				row := []interface{}{
+					id, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+				}
+				appendToExcel(file, fileName, row)
+				log.Printf("ID: %s 返回 HTML 内容，可能触发风控，尝试更换IP并重试，仅写入 ID", id)
 				continue
 			}
 			log.Printf("解析 JSON 失败, ID: %s 错误: %v", id, err)
 			return
 		}
+		// 添加判断逻辑，如果 message=404，出现 UNPUBLISHED，或者 data 是空的，则记录 id 并跳过
+		if result.Data.Product.AllOffers == nil || len(result.Data.Product.AllOffers) == 0 || strings.Contains(bodyStr, "UNPUBLISHED") || strings.Contains(bodyStr, "\"message\":\"404\"") {
+			// 记录 ID 但其他列留空，只写入一次
+			row := []interface{}{
+				id, "空", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+			}
+			appendToExcel(file, fileName, row)
+			log.Printf("ID: %s 返回的数据无效，仅写入 ID", id)
+			continue
+		}
 
 		// 遍历所有 offer，并写入 Excel 文件
+		offersWritten := false // 标志是否已经写入了数据行
 		for _, offer := range result.Data.Product.AllOffers {
 			row := []interface{}{
 				offer.UsItemID, offer.OfferLevelBadges, offer.ImageInfo.ThumbnailUrl, offer.OfferID, offer.OfferType, offer.AvailabilityStatus, offer.FulfillmentType,
@@ -372,12 +393,26 @@ func crawler(id string, file *excelize.File, fileName string) {
 			// 写入 Excel
 			appendToExcel(file, fileName, row)
 			log.Printf("ID: %s 的数据写入成功", id)
+			offersWritten = true // 标记为 true，表明已经有数据写入
 		}
+		// 如果没有写入任何 offer 数据
+		if !offersWritten {
+			row := []interface{}{id, "空", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""}
+			appendToExcel(file, fileName, row)
+			log.Printf("ID: %s 无有效 offer，仅写入 ID", id)
+			break
+		}
+
+		// 成功后退出循环
 		break
-		if retries >= maxRetries {
-			log.Printf("ID: %s 重试次数过多, 放弃处理", id)
-		}
+		// 检查重试次数
+		//if retries >= maxRetries {
+		//	log.Printf("ID: %s 重试次数过多, 放弃处理", id)
+		//	return
+		//}
+
 	}
+
 }
 
 func appendToExcel(file *excelize.File, fileName string, row []interface{}) {

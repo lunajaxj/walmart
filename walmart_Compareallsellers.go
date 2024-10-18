@@ -227,42 +227,42 @@ func crawler(id string, file *excelize.File, fileName string) {
 		q := req.URL.Query()
 		q.Add("variables", params)
 		req.URL.RawQuery = q.Encode()
-		//cookies := []string{
-		//	fmt.Sprintf("abqme=%t", rand.Intn(2) == 0),
-		//	fmt.Sprintf("vtc=%s", randomString(22)),
-		//	fmt.Sprintf("_pxhd=%s:%s", randomString(64), randomString(36)),
-		//	fmt.Sprintf("ACID=%s", randomString(36)),
-		//	fmt.Sprintf("_m=%d", rand.Intn(10)),
-		//	"hasACID=true",
-		//	fmt.Sprintf("_pxvid=%s", randomString(36)),
-		//	fmt.Sprintf("AID=wmlspartner%%3D0%%3Areflectorid%%3D0000000000000000000000%%3Alastupd%%3D%d", time.Now().Unix()),
-		//	fmt.Sprintf("_sp_id.ad94=%s.%d.%d.%d.%d.%s", randomString(36), time.Now().Unix(), rand.Intn(10), time.Now().Unix(), time.Now().Unix(), randomString(36)),
-		//	fmt.Sprintf("mdLogger=%t", rand.Intn(2) == 0),
-		//	fmt.Sprintf("kampyle_userid=%s", randomString(36)),
-		//	fmt.Sprintf("kampyleUserSession=%d", time.Now().UnixNano()),
-		//	fmt.Sprintf("kampyleUserSessionsCount=%d", rand.Intn(5)+1),
-		//	fmt.Sprintf("kampyleSessionPageCounter=%d", rand.Intn(10)+1),
-		//	fmt.Sprintf("_gcl_au=1.1.%d.%d", rand.Int63(), time.Now().Unix()),
-		//	fmt.Sprintf("_uetvid=%s", randomString(36)),
-		//	fmt.Sprintf("locGuestData=%s", randomString(128)),
-		//}
-
-		//cookieString := strings.Join(cookies, "; ")
-		//fmt.Println(cookieString)
-		//从文件读取 cookie
-		cookie, err := readCookieFromFile("cookie_Compareallsellers.txt")
-		if err != nil {
-			fmt.Println("Error reading cookie from file:", err)
-			return
+		cookies := []string{
+			fmt.Sprintf("abqme=%t", rand.Intn(2) == 0),
+			fmt.Sprintf("vtc=%s", randomString(22)),
+			fmt.Sprintf("_pxhd=%s:%s", randomString(64), randomString(36)),
+			fmt.Sprintf("ACID=%s", randomString(36)),
+			fmt.Sprintf("_m=%d", rand.Intn(10)),
+			"hasACID=true",
+			fmt.Sprintf("_pxvid=%s", randomString(36)),
+			fmt.Sprintf("AID=wmlspartner%%3D0%%3Areflectorid%%3D0000000000000000000000%%3Alastupd%%3D%d", time.Now().Unix()),
+			fmt.Sprintf("_sp_id.ad94=%s.%d.%d.%d.%d.%s", randomString(36), time.Now().Unix(), rand.Intn(10), time.Now().Unix(), time.Now().Unix(), randomString(36)),
+			fmt.Sprintf("mdLogger=%t", rand.Intn(2) == 0),
+			fmt.Sprintf("kampyle_userid=%s", randomString(36)),
+			fmt.Sprintf("kampyleUserSession=%d", time.Now().UnixNano()),
+			fmt.Sprintf("kampyleUserSessionsCount=%d", rand.Intn(5)+1),
+			fmt.Sprintf("kampyleSessionPageCounter=%d", rand.Intn(10)+1),
+			fmt.Sprintf("_gcl_au=1.1.%d.%d", rand.Int63(), time.Now().Unix()),
+			fmt.Sprintf("_uetvid=%s", randomString(36)),
+			fmt.Sprintf("locGuestData=%s", randomString(128)),
 		}
+		cookieString := strings.Join(cookies, "; ")
+		fmt.Println(cookieString)
+		//从文件读取 cookie
+		//cookie, err := readCookieFromFile("cookie_Compareallsellers.txt")
+		//if err != nil {
+		//	fmt.Println("Error reading cookie from file:", err)
+		//	return
+		//}
+		deviceProfileRefID := generateDeviceProfileRefID()
 		headers := map[string]string{
 			"accept":                  "application/json",
 			"accept-encoding":         "gzip, deflate, br, zstd",
 			"accept-language":         "en-US",
 			"baggage":                 "trafficType=customer,deviceType=desktop,renderScope=SSR,webRequestSource=Browser,pageName=itemPage,isomorphicSessionId=qwyUBqLjLC-pvHA9_ADKb",
 			"content-type":            "application/json",
-			"cookie":                  cookie,
-			"device_profile_ref_id":   "9qxhmmujuwprwslpsrptltmc6-4crzcjbri-",
+			"cookie":                  cookieString,
+			"device_profile_ref_id":   deviceProfileRefID,
 			"downlink":                "1.45",
 			"dpr":                     "1.5",
 			"priority":                "u=1, i",
@@ -347,7 +347,6 @@ func crawler(id string, file *excelize.File, fileName string) {
 			log.Printf("读取响应失败, ID: %s 错误: %v", id, err)
 			return
 		}
-
 		// 转换为字符串格式的响应内容
 		bodyStr := string(body)
 		log.Printf("响应内容: %s", bodyStr)
@@ -357,7 +356,12 @@ func crawler(id string, file *excelize.File, fileName string) {
 			log.Printf("ID: %s 被风控, 响应包含 'Robot or human?'，尝试更换IP并重试...", id)
 			retries++
 			time.Sleep(time.Second * 5)
-			continue
+			row := []interface{}{
+				id, "被风控，仅写入id", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+			}
+			appendToExcel(file, fileName, row)
+			log.Printf("ID: %s 被风控，仅写入 ID", id)
+			break
 		}
 
 		// 解析 JSON 响应（如果不是风控）
@@ -367,13 +371,29 @@ func crawler(id string, file *excelize.File, fileName string) {
 				log.Printf("ID: %s 返回 HTML 内容，可能触发风控，尝试更换IP并重试...", id)
 				retries++
 				time.Sleep(time.Second * 5)
-				continue
+				row := []interface{}{
+					id, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+				}
+				appendToExcel(file, fileName, row)
+				log.Printf("ID: %s 返回 HTML 内容，可能触发风控，尝试更换IP并重试，仅写入 ID", id)
+				break
 			}
 			log.Printf("解析 JSON 失败, ID: %s 错误: %v", id, err)
 			return
 		}
+		// 添加判断逻辑，如果 message=404，出现 UNPUBLISHED，或者 data 是空的，则记录 id 并跳过
+		if result.Data.Product.AllOffers == nil || len(result.Data.Product.AllOffers) == 0 || strings.Contains(bodyStr, "UNPUBLISHED") || strings.Contains(bodyStr, "\"message\":\"404\"") {
+			// 记录 ID 但其他列留空，只写入一次
+			row := []interface{}{
+				id, "空", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+			}
+			appendToExcel(file, fileName, row)
+			log.Printf("ID: %s 返回的数据无效，仅写入 ID", id)
+			break
+		}
 
 		// 遍历所有 offer，并写入 Excel 文件
+		offersWritten := false // 标志是否已经写入了数据行
 		for _, offer := range result.Data.Product.AllOffers {
 			row := []interface{}{
 				offer.UsItemID, offer.OfferLevelBadges, offer.ImageInfo.ThumbnailUrl, offer.OfferID, offer.OfferType, offer.AvailabilityStatus, offer.FulfillmentType,
@@ -385,11 +405,19 @@ func crawler(id string, file *excelize.File, fileName string) {
 			// 写入 Excel
 			appendToExcel(file, fileName, row)
 			log.Printf("ID: %s 的数据写入成功", id)
+			offersWritten = true // 标记为 true，表明已经有数据写入
+		}
+		// 如果没有写入任何 offer 数据
+		if !offersWritten {
+			row := []interface{}{id, "空", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""}
+			appendToExcel(file, fileName, row)
+			log.Printf("ID: %s 无有效 offer，仅写入 ID", id)
+			break
 		}
 		break
-		if retries >= maxRetries {
-			log.Printf("ID: %s 重试次数过多, 放弃处理", id)
-		}
+		//if retries >= maxRetries {
+		//	log.Printf("ID: %s 重试次数过多, 放弃处理", id)
+		//}
 	}
 }
 
@@ -413,9 +441,20 @@ func appendToExcel(file *excelize.File, fileName string, row []interface{}) {
 		log.Println("Failed to save Excel file:", err)
 	}
 }
-
 func randomString(length int) string {
 	charset := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
+// 生成随机的伪装 device_profile_ref_id
+func generateDeviceProfileRefID() string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	const length = 48
 	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
 	b := make([]byte, length)
 	for i := range b {

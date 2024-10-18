@@ -25,27 +25,6 @@ var mu sync.Mutex
 var file *excelize.File
 var num int
 
-func getRandomUserAgent() string {
-	userAgents := []string{
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-		//"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0.2 Safari/605.1.15",
-		//"Mozilla/5.0 (Linux; Android 10; Pixel 3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.127 Mobile Safari/537.36",
-		// 可以添加更多的 User-Agent 字符串
-	}
-
-	rand.Seed(time.Now().UnixNano())
-	return userAgents[rand.Intn(len(userAgents))]
-}
-
-func getRandomDownlink() string {
-	return fmt.Sprintf("%.1f", rand.Float64()*2+1) // 1-3 MB
-}
-
-func getRandomDpr() string {
-	return fmt.Sprintf("%.1f", rand.Float64()*1+1) // 1-2
-}
-
 type Wal struct {
 	id                string
 	ids_Wal           string
@@ -75,22 +54,46 @@ type Wal struct {
 var idStores []string
 var ids []string
 var wg = sync.WaitGroup{}
-var ch = make(chan int, 3)
+
+// var ch chan int
+var sem chan struct{} // 信号量控制并发
+// var ch = make(chan int, 3)
+var currentRate int
+
+func init() {
+	// 初始化 currentRate 通过读取速率文件
+	currentRate = readRateFromFile("speed_walmart_2.txt")
+	if currentRate <= 0 {
+		currentRate = 6 // 如果读取失败，设置默认值为5
+	}
+	fmt.Printf("当前速率为: %d\n", currentRate)
+	//ch = make(chan int, currentRate) // 创建通道
+	sem = make(chan struct{}, currentRate) // 创建信号量
+}
+
+func readRateFromFile(filename string) int {
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Printf("无法读取速率文件 %s，使用默认速率: %v", filename, err)
+		return 6 // 默认速率
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if scanner.Scan() {
+		rate, err := strconv.Atoi(scanner.Text())
+		if err != nil {
+			log.Printf("速率文件中的值无效，使用默认速率: %v", err)
+			return 6 // 默认速率
+		}
+		return rate
+	}
+	log.Printf("速率文件为空，使用默认速率")
+	return 6 // 默认速率
+}
 
 func main() {
-	// 创建日志文件
-	logFile, err := os.OpenFile("log.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		fmt.Printf("Failed to open log file: %v\n", err)
-		return
-	}
-	defer logFile.Close()
-
-	// 日志同时输出到文件和控制台
-	multiWriter := io.MultiWriter(os.Stdout, logFile)
-	log.SetOutput(multiWriter)
-
-	log.Println("自动化脚本-walmart-信息采集-跟卖库存信息")
+	log.Println("自动化脚本-walmart-信息采集")
 	log.Println("开始执行...")
 
 	// 打开或创建Excel文件
@@ -156,9 +159,15 @@ func main() {
 	log.Println("IDs and ID Stores:", ids, idStores)
 
 	for i := range ids {
-		ch <- 1
-		wg.Add(8)
-		go crawler(ids[i], idStores[i])
+		wg.Add(1)
+		sem <- struct{}{} // 获取信号量
+		go func(id, idStore string) {
+			defer func() {
+				<-sem // 释放信号量
+				wg.Done()
+			}()
+			crawler(id, idStore)
+		}(ids[i], idStores[i])
 	}
 
 	wg.Wait()
@@ -176,16 +185,20 @@ func exists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-var IsC = false
-var IsC2 = true
+// var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+// var IsC = false
+// var IsC2 = true
+var prevHeaders map[string]string
 
 func crawler(id string, id_store string) {
-	defer func() {
-		wg.Done()
-		<-ch
-	}()
-	for i := 0; i < 16; i++ {
+	//defer func() {
+	//	wg.Done()
+	//	<-ch
+	//}()
+	rateLimitCounter := 0 // 风控计数器
+	for i := 0; i < 3; i++ {
+		// 在每次请求之间增加一个随机的延迟，延迟的时间根据 currentRate 动态调整
+		time.Sleep(time.Second * time.Duration(11-currentRate))
 		if i != 0 {
 			time.Sleep(time.Second * 2)
 		}
@@ -205,344 +218,395 @@ func crawler(id string, id_store string) {
 			log.Printf("Failed to create request for id %s: %v", id, err)
 			continue
 		}
-
-		// 动态伪装 User-Agent，随机模拟不同浏览器和设备
-		userAgents := []string{
-			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+		// 再次检查 req 是否为 nil，防止请求在使用过程中被错误操作
+		if req == nil {
+			log.Printf("Request became nil for id %s, skipping", id)
+			break
 		}
-		req.Header.Set("User-Agent", userAgents[time.Now().Unix()%int64(len(userAgents))])
-		req.Header.Set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-		req.Header.Set("accept-encoding", "gzip, deflate, br,zstd")
-		//
-		// 伪装 Accept-Language，模拟全球不同用户的访问语言
-		acceptLanguages := []string{
-			"zh-CN,zh;q=0.9,en;q=0.8",
-			"en-US,en;q=0.9",
+
+		setHeaders(req) // 设置初始请求头
+		// 检查在请求发送之前，当前请求的所有请求头
+		//log.Printf("准备发送请求的请求头 for id %s:\n%v", id, req.Header)
+		response, err := client.Do(req)
+		if err != nil {
+			// 错误处理逻辑
+			if strings.Contains(err.Error(), "Proxy Bad Serve") || strings.Contains(err.Error(), "context deadline exceeded") {
+				log.Println("错误代码打印：" + err.Error())
+				log.Println("等待请求头超时，重新开始当前ID：" + id)
+
+				continue
+			} else if strings.Contains(err.Error(), "441") {
+				log.Println("代理超频！暂停10秒后继续...")
+				time.Sleep(time.Second * 10)
+
+				continue
+			} else if strings.Contains(err.Error(), "440") {
+				log.Println("代理宽带超频！暂停5秒后继续...")
+				time.Sleep(time.Second * 5)
+
+				continue
+			} else if strings.Contains(err.Error(), "Request Rate Over Limit") {
+				log.Println("超频警告：" + err.Error())
+				log.Println("超频，暂停5秒后继续...")
+				time.Sleep(time.Second * 5)
+
+				continue
+			} else {
+				log.Println("错误信息：" + err.Error())
+				log.Println("出现错误，如果同id连续出现请联系我，重新开始：" + id)
+			}
 		}
-		req.Header.Set("accept-language", acceptLanguages[time.Now().Unix()%int64(len(acceptLanguages))])
-		req.Header.Set("cache-control", "max-age=0")
-		req.Header.Set("downlink", "5.7")
-		req.Header.Set("dpr", "1.5")
-		req.Header.Set("priority", "u=0, i")
-		//动态伪装 sec-ch 系列字段
-		secCHUA := []string{
-			`"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"`,
-			`"Chromium";v="128", "Google Chrome";v="128", "Not=A?Brand";v="8"`,
+		// 检查 response 是否为 nil
+		if response == nil {
+			log.Printf("Response is nil for id %s, skipping this iteration", id)
+			continue
 		}
-		req.Header.Set("sec-ch-ua", secCHUA[time.Now().Unix()%int64(len(secCHUA))])
-		req.Header.Set("sec-ch-ua-mobile", "?0")
-		req.Header.Set("sec-ch-ua-platform", `"Windows"`)
-		req.Header.Set("sec-fetch-dest", "document")
-		req.Header.Set("sec-fetch-mode", "navigate")
-		req.Header.Set("sec-fetch-site", "same-origin")
-		//req.Header.Set("sec-fetch-user", "?1")
-		//req.Header.Set("upgrade-insecure-requests", "1")
+		defer response.Body.Close()
 
-		// 伪装 Referer，模拟从其他页面跳转过来的请求
-		//referers := []string{
-		//	"https://www.walmart.com/",
-		//}
-		//req.Header.Set("Referer", referers[time.Now().Unix()%int64(len(referers))])
-
-		// 模拟设置 Cookie，Cookie 需要根据实际会话生成并保持更新
-		//req.Header.Set("Cookie", "abqme=true; vtc=RWwQb_YT8m7EAJ6QAJPOvA; _pxhd=a74599d23970747394ade0386613f36426c4492b95619449a3a15da22efd4c07")
-
-		// 初始化一个计数器用于追踪连续出现的次数
-		consecutiveElseCount := 0
-		for {
-			response, err := client.Do(req)
+		result := ""
+		if response.Header.Get("Content-Encoding") == "gzip" {
+			reader, err := gzip.NewReader(response.Body)
 			if err != nil {
-				if strings.Contains(err.Error(), "Proxy Bad Serve") || strings.Contains(err.Error(), "context deadline exceeded") {
-					log.Println("错误代码打印：" + err.Error())
-					log.Println("等待请求头超时，重新开始当前ID：" + id)
-					consecutiveElseCount = 0 // 重置计数器，因为不是 else
-					continue
-				} else if strings.Contains(err.Error(), "441") {
-					log.Println("代理超频！暂停10秒后继续...")
-					time.Sleep(time.Second * 10)
-					consecutiveElseCount = 0 // 重置计数器，因为不是 else
-					continue
-				} else if strings.Contains(err.Error(), "440") {
-					log.Println("代理宽带超频！暂停5秒后继续...")
-					time.Sleep(time.Second * 5)
-					consecutiveElseCount = 0 // 重置计数器，因为不是 else
-					continue
-				} else if strings.Contains(err.Error(), "Request Rate Over Limit") {
-					// 新增对 "Request Rate Over Limit" 错误的处理
-					log.Println("超频警告：" + err.Error())
-					log.Println("超频，暂停5秒后继续...")
-					time.Sleep(time.Second * 5)
-					consecutiveElseCount = 0 // 重置计数器
-					continue
-				} else {
-					log.Println("错误信息：" + err.Error())
-					log.Println("出现错误，如果同id连续出现请联系我，重新开始：" + id)
-					// 增加连续出现的错误计数器
-					consecutiveElseCount++
-
-					// 检查是否已连续出现10次
-					if consecutiveElseCount >= 6 {
-						log.Println("已连续出现6次错误，切换请求头...")
-
-						// 检查当前请求头是否包含 "Upgrade-Insecure-Requests"
-						if req.Header.Get("Upgrade-Insecure-Requests") == "" {
-							req.Header.Set("Upgrade-Insecure-Requests", "1")
-						} else {
-							req.Header.Del("Upgrade-Insecure-Requests")
-							req.Header.Set("User-Agent", getRandomUserAgent())
-						}
-
-						// 重置连续错误计数器
-						consecutiveElseCount = 0
-					}
-					continue
-
-				}
-			}
-			// 请求成功时，重置连续错误计数器
-			consecutiveElseCount = 0
-			defer response.Body.Close()
-
-			result := ""
-			if response.Header.Get("Content-Encoding") == "gzip" {
-				reader, err := gzip.NewReader(response.Body)
-				if err != nil {
-					log.Println("解析body错误，重新开始：" + id)
-					continue
-				}
-				defer reader.Close()
-				con, err := io.ReadAll(reader)
-				if err != nil {
-					log.Println("gzip解压错误，重新开始：" + id)
-					continue
-				}
-				result = string(con)
-			} else {
-				dataBytes, err := io.ReadAll(response.Body)
-				if err != nil {
-					if strings.Contains(err.Error(), "Proxy Bad Serve") || strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "Service Unavailable") {
-						log.Println("代理IP无效，自动切换中")
-						log.Println("连续出现代理IP无效请联系我，重新开始：" + id)
-					} else {
-						log.Println("错误信息：" + err.Error())
-						log.Println("出现错误，如果同id连续出现请联系我，重新开始：" + id)
-					}
-					continue
-				}
-				result = string(dataBytes)
-			}
-
-			wal := Wal{}
-			wal.id = id
-			if id_store != "" {
-				wal.ids_Wal = id + "|" + id_store
-			} else {
-				wal.ids_Wal = id + "|"
-			}
-			if strings.Contains(result, "This page could not be found.") {
-				wal.typez = "该商品不存在"
-				appendToExcel(wal)
-				log.Println("id:" + id + "商品不存在")
-				return
-			}
-
-			upc := regexp.MustCompile("upc\":\"(.{4,30}?)\"").FindAllStringSubmatch(result, -1)
-			gtin := regexp.MustCompile("gtin13\":\"(.{4,30}?)\"").FindAllStringSubmatch(result, -1)
-			fk := regexp.MustCompile("(Robot or human?)").FindAllStringSubmatch(result, -1)
-			if len(upc) > 0 {
-				wal.value = upc[0][1]
-				wal.typez = "upc"
-			} else if len(gtin) > 0 {
-				wal.value = gtin[0][1]
-				wal.typez = "gtin"
-			} else if len(fk) > 0 {
-				log.Println("id:" + id + " 被风控,更换IP继续")
-				IsC = !IsC
-				continue
-			} else {
-				wal.value = ""
-				wal.typez = "ean"
-			}
-
-			doc1, err := htmlquery.Parse(strings.NewReader(result))
-			if err != nil {
-				log.Printf("Failed to parse HTML for id %s: %v", id, err)
+				log.Println("解析body错误，重新开始：" + id)
 				continue
 			}
-
-			doc, err := goquery.NewDocumentFromReader(strings.NewReader(result))
+			defer reader.Close()
+			con, err := io.ReadAll(reader)
 			if err != nil {
-				log.Printf("Failed to create goquery document for id %s: %v", id, err)
+				log.Println("gzip解压错误，重新开始：" + id)
 				continue
 			}
-
-			brand := regexp.MustCompile("\"brand\":\"(.+?)\"").FindAllStringSubmatch(result, -1)
-			if len(brand) > 0 {
-				wal.brand = brand[0][1]
-			}
-
-			query, err := htmlquery.QueryAll(doc1, "//div[@class='flex items-center mv2 flex-wrap']//span")
+			result = string(con)
+		} else {
+			dataBytes, err := io.ReadAll(response.Body)
 			if err != nil {
-				log.Println("无标签,错误代码:", err)
-			} else {
-				queryStr := ""
-				for _, v := range query {
-					text := strings.TrimSpace(htmlquery.InnerText(v)) // 去掉左右空白字符
-					if !strings.Contains(queryStr, text) {
-						if queryStr != "" { // 如果 queryStr 不为空，则添加竖线
-							queryStr += "|"
-						}
-						queryStr += text
-					}
-				}
-				wal.query = queryStr
-			}
-
-			title := regexp.MustCompile("\"productName\":\"(.+?)\",").FindAllStringSubmatch(result, -1)
-			if len(title) > 0 {
-				wal.title = strings.Replace(title[0][1], "\\u0026", "&", -1)
-			} else {
-				log.Printf("Failed to get title for id %s", id)
+				log.Println("错误信息：" + err.Error())
+				log.Println("出现错误，如果同id连续出现请联系我，重新开始：" + id)
 				continue
 			}
+			result = string(dataBytes)
+		}
 
-			stock := regexp.MustCompile(`("message":"Currently out of stock")`).FindAllStringSubmatch(result, -1)
-			if len(stock) == 0 {
-				wal.stock = "有库存"
-			} else {
-				wal.stock = "无库存"
-			}
-
-			score := regexp.MustCompile("[(]([\\d][.][\\d])[)]").FindAllStringSubmatch(result, -1)
-			if len(score) > 0 {
-				wal.score = score[0][1]
-			}
-
-			review := regexp.MustCompile("\"totalReviewCount\":(\\d+)").FindAllStringSubmatch(result, -1)
-			if len(review) > 0 {
-				wal.review = review[0][1]
-			}
-
-			price := regexp.MustCompile(`"best[^{]+?,"priceDisplay":"([^"]+)"`)
-			price1 := price.FindAllString(result, -1)
-			if len(price1) > 0 {
-				if strings.Contains(price1[0], `"priceDisplay":"`) {
-					parts := strings.Split(price1[0], `"priceDisplay":"`)
-					if len(parts) > 1 {
-						valueParts := strings.Split(parts[1], `"`)
-						if len(valueParts) > 0 {
-							reg := regexp.MustCompile(`[^\d.]`)
-							numericValue := reg.ReplaceAllString(valueParts[0], "")
-							wal.price = numericValue
-						}
-					}
-				}
-			}
-
-			category := regexp.MustCompile(`categoryName":"(.+?)",`).FindAllStringSubmatch(result, -1)
-			if len(category) > 0 {
-				wal.category = strings.Replace(category[0][1], `\u0026`, "&", -1)
-			}
-
-			all, err := htmlquery.QueryAll(doc1, "//div/div/span[@class=\"lh-title\"]//text()")
-			if err != nil {
-				log.Printf("Failed to get seller and delivery info for id %s", id)
-			} else {
-				for i, v := range all {
-					sv := htmlquery.InnerText(v)
-					if strings.Contains(sv, "Sold by") {
-						wal.seller = htmlquery.InnerText(all[i+1])
-						continue
-					}
-					if strings.Contains(sv, "Fulfilled by") {
-						wal.delivery = strings.Replace(sv, "Fulfilled by ", "", -1)
-						if len(wal.delivery) < 3 && len(all) > i+1 {
-							wal.delivery = htmlquery.InnerText(all[i+1])
-						}
-						continue
-					}
-					if strings.Contains(sv, "Sold and shipped by") {
-						wal.seller = htmlquery.InnerText(all[i+1])
-						wal.delivery = wal.seller
-						break
-					}
-				}
-			}
-
-			if wal.seller == "" {
-				seller := regexp.MustCompile("\"sellerDisplayName\":\"(.*?)\"").FindAllStringSubmatch(result, -1)
-				if len(seller) > 0 {
-					wal.seller = seller[0][1]
-				}
-			}
-
-			nodeList, err := htmlquery.QueryAll(doc1, "//*[@id=\"maincontent\"]/section/main/div[2]/div[2]/div/div[1]/div/div[2]/div/div/div[8]/section/div/div/div/div/div[1]/button/label/div[3]")
-			if err != nil {
-				log.Printf("Failed to get delivery date for id %s: %v", id, err)
-			} else {
-				var deliveryDate string
-				for _, node := range nodeList {
-					deliveryDate += htmlquery.InnerText(node) + " "
-				}
-				wal.deliveryDate = deliveryDate
-			}
-
-			crossedPrice := `<span aria-hidden="true" data-seo-id="strike-through-price" class="mr2 f6 gray strike">(.*?)</span>`
-			re := regexp.MustCompile(crossedPrice)
-			matches := re.FindStringSubmatch(string(result))
-			if len(matches) > 1 {
-				wal.crossedPrice = matches[1]
-			}
-
-			freeFreightStr := ""
-			doc.Find(".mt1.h1 .f7").Each(func(index int, s *goquery.Selection) {
-				text := s.Text()
-				if !strings.Contains(freeFreightStr, text) {
-					freeFreightStr += text + " "
-				}
-			})
-			wal.freeFreight = freeFreightStr
-
-			variant := regexp.MustCompile(":</span><span class=\"ml1\">(.*?)</span>").FindAllStringSubmatch(result, -1)
-			if len(variant) == 1 {
-				wal.variant1 = variant[0][1]
-			} else if len(variant) == 2 {
-				wal.variant1 = variant[0][1]
-				wal.variant2 = variant[1][1]
-			}
-
-			allString := regexp.MustCompile("\",\"usItemId\":\"([0-9]+?)\"").FindAllStringSubmatch(result, -1)
-			for i := range allString {
-				wal.otherIds = append(wal.otherIds, allString[i][1])
-			}
-
-			startingFrom := regexp.MustCompile(`"priceType":.{0,20},"priceString":"(\$[^<]+?)",`).FindAllStringSubmatch(result, -1)
-			if len(startingFrom) > 0 {
-				wal.startingFrom = startingFrom[0][1]
-			}
-
-			moreSellerOptions := regexp.MustCompile(`"additionalOfferCount":(\d+),`).FindAllStringSubmatch(result, -1)
-			if len(moreSellerOptions) > 0 {
-				wal.moreSellerOptions = moreSellerOptions[0][1]
-			}
-
-			availableQuantity := regexp.MustCompile("availableQuantity\":(\\d+),").FindAllStringSubmatch(result, -1)
-			if len(availableQuantity) > 0 {
-				wal.availableQuantity = availableQuantity[0][1]
-			}
-
-			if id_store != "" {
-				log.Println("id:" + id + "|" + id_store + " 完成")
-			} else {
-				log.Println("id:" + id + " 完成")
-			}
+		wal := Wal{}
+		wal.id = id
+		if id_store != "" {
+			wal.ids_Wal = id + "|" + id_store
+		} else {
+			wal.ids_Wal = id + "|"
+		}
+		if strings.Contains(result, "This page could not be found.") {
+			wal.typez = "该商品不存在"
 			appendToExcel(wal)
+			log.Println("id:" + id + "商品不存在")
 			return
 		}
+
+		upc := regexp.MustCompile("upc\":\"(.{4,30}?)\"").FindAllStringSubmatch(result, -1)
+		gtin := regexp.MustCompile("gtin13\":\"(.{4,30}?)\"").FindAllStringSubmatch(result, -1)
+		fk := regexp.MustCompile("(Robot or human?)").FindAllStringSubmatch(result, -1)
+		if len(upc) > 0 {
+			wal.value = upc[0][1]
+			wal.typez = "upc"
+		} else if len(gtin) > 0 {
+			wal.value = gtin[0][1]
+			wal.typez = "gtin"
+		} else if len(fk) > 0 {
+			log.Println("id:" + id + " 被风控，重新请求")
+			//IsC = !IsC
+			rateLimitCounter++
+			log.Printf("当前出现风控次数统计: %d", rateLimitCounter)
+
+			// 当风控连续出现2次时，调整请求头和速率
+			if rateLimitCounter >= 2 {
+				log.Println("连续2次被风控，调整请求头参数和速率")
+				// 更换请求头，随机删除一个请求头
+				removableHeaders := []string{"Upgrade-Insecure-Requests"}
+				headerToRemove := removableHeaders[rand.Intn(len(removableHeaders))]
+				req.Header.Del(headerToRemove)
+				log.Printf("由于风控连续两次，请删除或增加requestHeaders_wal_2中请求头参数")
+				log.Printf("当前请求头参数:%s", req.Header)
+
+				// 随机等待 5 到 10 秒
+				time.Sleep(time.Second * time.Duration(5+rand.Intn(6)))
+
+				// 将请求速率降低
+				if currentRate > 4 {
+					currentRate--
+					log.Printf("当前请求速率已降低至: %d", currentRate)
+				} else if currentRate == 4 {
+					log.Printf("当前请求速率已降低至4,无法降速,等待5秒后重新请求")
+					time.Sleep(5 * time.Second)
+				}
+
+				rateLimitCounter = 0 // 重置计数器
+			}
+
+			continue
+		} else {
+			wal.value = ""
+			wal.typez = "ean"
+		}
+
+		doc1, err := htmlquery.Parse(strings.NewReader(result))
+		if err != nil {
+			log.Printf("Failed to parse HTML for id %s: %v", id, err)
+			continue
+		}
+
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(result))
+		if err != nil {
+			log.Printf("Failed to create goquery document for id %s: %v", id, err)
+			continue
+		}
+
+		brand := regexp.MustCompile("\"brand\":\"(.+?)\"").FindAllStringSubmatch(result, -1)
+		if len(brand) > 0 {
+			wal.brand = brand[0][1]
+		}
+
+		query, err := htmlquery.QueryAll(doc1, "//div[@class='flex items-center mv2 flex-wrap']//span")
+		if err != nil {
+			log.Println("无标签,错误代码:", err)
+		} else {
+			queryStr := ""
+			for _, v := range query {
+				text := strings.TrimSpace(htmlquery.InnerText(v)) // 去掉左右空白字符
+				if !strings.Contains(queryStr, text) {
+					if queryStr != "" { // 如果 queryStr 不为空，则添加竖线
+						queryStr += "|"
+					}
+					queryStr += text
+				}
+			}
+			wal.query = queryStr
+		}
+
+		title := regexp.MustCompile("\"productName\":\"(.+?)\",").FindAllStringSubmatch(result, -1)
+		if len(title) > 0 {
+			wal.title = strings.Replace(title[0][1], "\\u0026", "&", -1)
+		} else {
+			log.Printf("Failed to get title for id %s", id)
+			continue
+		}
+
+		stock := regexp.MustCompile(`("message":"Currently out of stock")`).FindAllStringSubmatch(result, -1)
+		if len(stock) == 0 {
+			wal.stock = "有库存"
+		} else {
+			wal.stock = "无库存"
+		}
+
+		score := regexp.MustCompile("[(]([\\d][.][\\d])[)]").FindAllStringSubmatch(result, -1)
+		if len(score) > 0 {
+			wal.score = score[0][1]
+		}
+
+		review := regexp.MustCompile("\"totalReviewCount\":(\\d+)").FindAllStringSubmatch(result, -1)
+		if len(review) > 0 {
+			wal.review = review[0][1]
+		}
+
+		price := regexp.MustCompile(`"best[^{]+?,"priceDisplay":"([^"]+)"`)
+		price1 := price.FindAllString(result, -1)
+		if len(price1) > 0 {
+			if strings.Contains(price1[0], `"priceDisplay":"`) {
+				parts := strings.Split(price1[0], `"priceDisplay":"`)
+				if len(parts) > 1 {
+					valueParts := strings.Split(parts[1], `"`)
+					if len(valueParts) > 0 {
+						reg := regexp.MustCompile(`[^\d.]`)
+						numericValue := reg.ReplaceAllString(valueParts[0], "")
+						wal.price = numericValue
+					}
+				}
+			}
+		}
+
+		category := regexp.MustCompile(`categoryName":"(.+?)",`).FindAllStringSubmatch(result, -1)
+		if len(category) > 0 {
+			wal.category = strings.Replace(category[0][1], `\u0026`, "&", -1)
+		}
+
+		all, err := htmlquery.QueryAll(doc1, "//div/div/span[@class=\"lh-title\"]//text()")
+		if err != nil {
+			log.Printf("Failed to get seller and delivery info for id %s", id)
+		} else {
+			for i, v := range all {
+				sv := htmlquery.InnerText(v)
+				if strings.Contains(sv, "Sold by") {
+					wal.seller = htmlquery.InnerText(all[i+1])
+					continue
+				}
+				if strings.Contains(sv, "Fulfilled by") {
+					wal.delivery = strings.Replace(sv, "Fulfilled by ", "", -1)
+					if len(wal.delivery) < 3 && len(all) > i+1 {
+						wal.delivery = htmlquery.InnerText(all[i+1])
+					}
+					continue
+				}
+				if strings.Contains(sv, "Sold and shipped by") {
+					wal.seller = htmlquery.InnerText(all[i+1])
+					wal.delivery = wal.seller
+					break
+				}
+			}
+		}
+
+		if wal.seller == "" {
+			seller := regexp.MustCompile("\"sellerDisplayName\":\"(.*?)\"").FindAllStringSubmatch(result, -1)
+			if len(seller) > 0 {
+				wal.seller = seller[0][1]
+			}
+		}
+
+		nodeList, err := htmlquery.QueryAll(doc1, "//*[@id=\"maincontent\"]/section/main/div[2]/div[2]/div/div[1]/div/div[2]/div/div/div[8]/section/div/div/div/div/div[1]/button/label/div[3]")
+		if err != nil {
+			log.Printf("Failed to get delivery date for id %s: %v", id, err)
+		} else {
+			var deliveryDate string
+			for _, node := range nodeList {
+				deliveryDate += htmlquery.InnerText(node) + " "
+			}
+			wal.deliveryDate = deliveryDate
+		}
+
+		crossedPrice := `<span aria-hidden="true" data-seo-id="strike-through-price" class="mr2 f6 gray strike">(.*?)</span>`
+		re := regexp.MustCompile(crossedPrice)
+		matches := re.FindStringSubmatch(string(result))
+		if len(matches) > 1 {
+			wal.crossedPrice = matches[1]
+		}
+
+		freeFreightStr := ""
+		doc.Find(".mt1.h1 .f7").Each(func(index int, s *goquery.Selection) {
+			text := s.Text()
+			if !strings.Contains(freeFreightStr, text) {
+				freeFreightStr += text + " "
+			}
+		})
+		wal.freeFreight = freeFreightStr
+
+		variant := regexp.MustCompile(":</span><span class=\"ml1\">(.*?)</span>").FindAllStringSubmatch(result, -1)
+		if len(variant) == 1 {
+			wal.variant1 = variant[0][1]
+		} else if len(variant) == 2 {
+			wal.variant1 = variant[0][1]
+			wal.variant2 = variant[1][1]
+		}
+
+		allString := regexp.MustCompile("\",\"usItemId\":\"([0-9]+?)\"").FindAllStringSubmatch(result, -1)
+		for i := range allString {
+			wal.otherIds = append(wal.otherIds, allString[i][1])
+		}
+
+		startingFrom := regexp.MustCompile(`"priceType":.{0,20},"priceString":"(\$[^<]+?)",`).FindAllStringSubmatch(result, -1)
+		if len(startingFrom) > 0 {
+			wal.startingFrom = startingFrom[0][1]
+		}
+
+		moreSellerOptions := regexp.MustCompile(`"additionalOfferCount":(\d+),`).FindAllStringSubmatch(result, -1)
+		if len(moreSellerOptions) > 0 {
+			wal.moreSellerOptions = moreSellerOptions[0][1]
+		}
+
+		availableQuantity := regexp.MustCompile("availableQuantity\":(\\d+),").FindAllStringSubmatch(result, -1)
+		if len(availableQuantity) > 0 {
+			wal.availableQuantity = availableQuantity[0][1]
+		}
+
+		if id_store != "" {
+			log.Println("id:" + id + "|" + id_store + " 完成")
+		} else {
+			log.Println("id:" + id + " 完成")
+			//log.Printf("更换后的请求头信息 for id %s:\n%v", id, req.Header)
+		}
+		appendToExcel(wal)
+		return
 	}
 }
 
+func setHeaders(req *http.Request) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	rand.Seed(time.Now().UnixNano())
+
+	// 读取请求头参数从文件中
+	file, err := os.Open("requestHeaders_wal_2.txt")
+	if err != nil {
+		log.Fatalf("无法打开请求头文件: %v", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	var headerBuffer strings.Builder
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if len(line) == 0 {
+			continue
+		}
+
+		// 检查是否为请求头的值部分（即前一行没分割完的值）
+		if !strings.Contains(line, ":") {
+			headerBuffer.WriteString(line)
+			headerBuffer.WriteString(" ")
+			continue
+		}
+
+		// 如果读取到新的请求头字段，首先处理之前的缓冲区内容
+		if headerBuffer.Len() > 0 {
+			headerParts := strings.SplitN(headerBuffer.String(), ":", 2)
+			headerBuffer.Reset()
+			if len(headerParts) == 2 {
+				headerName := strings.TrimSpace(headerParts[0])
+				headerValue := strings.TrimSpace(headerParts[1])
+
+				// 检查头字段名称是否合法
+				if !isValidHeaderName(headerName) {
+					//log.Printf("忽略非法请求头字段名称: %s", headerName)
+					continue
+				}
+
+				req.Header.Set(headerName, headerValue)
+			}
+		}
+
+		// 将当前行内容写入缓冲区
+		headerBuffer.WriteString(line)
+	}
+
+	// 处理文件末尾的缓冲区内容
+	if headerBuffer.Len() > 0 {
+		headerParts := strings.SplitN(headerBuffer.String(), ":", 2)
+		if len(headerParts) == 2 {
+			headerName := strings.TrimSpace(headerParts[0])
+			headerValue := strings.TrimSpace(headerParts[1])
+
+			// 检查头字段名称是否合法
+			if !isValidHeaderName(headerName) {
+				//log.Printf("忽略非法请求头字段名称: %s", headerName)
+				return
+			}
+
+			req.Header.Set(headerName, headerValue)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("读取请求头文件出错: %v", err)
+	}
+}
+
+// 检查头字段名称是否合法
+func isValidHeaderName(name string) bool {
+	for _, r := range name {
+		if !(r == '-' || r == '_' || ('A' <= r && r <= 'Z') || ('a' <= r && r <= 'z') || ('0' <= r && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
 func appendToExcel(wal Wal) {
 	mu.Lock()
 	defer mu.Unlock()
